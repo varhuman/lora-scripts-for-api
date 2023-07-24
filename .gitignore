@@ -20,3 +20,5 @@ toml/autosave/*
 tests/
 
 huggingface/hub/models*
+
+python/

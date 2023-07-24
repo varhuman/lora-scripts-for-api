@@ -19,3 +19,11 @@ class TaggerInterrogateRequest(BaseModel):
     replace_underscore_excludes: str = Field(
         default="0_0, (o)_(o), +_+, +_-, ._., <o>_<o>, <|>_<|>, =_=, >_<, 3_3, 6_9, >_o, @_@, ^_^, o_o, u_u, x_x, |_|, ||_||"
     )
+
+
+class TrainingInfo(BaseModel):
+    is_training: bool = False
+    success: bool = False
+    error: str = ""
+    progress: float = 0.0
+    lora_name: str = ""

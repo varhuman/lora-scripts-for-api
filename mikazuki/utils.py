@@ -25,6 +25,22 @@ def check_training_params(data):
     return True
 
 
+def get_unique_folder_path(model_name: str) -> str:
+    base_dir = "./train"
+    count = 0
+    while True:
+        if count == 0:
+            folder_name = model_name
+        else:
+            folder_name = f"{model_name}{count}"
+        folder_path = os.path.join(base_dir, folder_name)
+        if not os.path.exists(folder_path):
+            os.makedirs(folder_path)
+            folder_path = folder_path.replace("\\", "/")
+            return folder_name, folder_path
+        count += 1
+
+
 def prepare_requirements():
     requirements = [
         "dadaptation", "prodigyopt"
