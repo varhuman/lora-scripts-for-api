@@ -116,10 +116,12 @@ class WaifuDiffusionInterrogator(Interrogator):
     def download(self) -> Tuple[os.PathLike, os.PathLike]:
         print(f"Loading {self.name} model file from {self.kwargs['repo_id']}")
 
-        model_path = Path(hf_hub_download(
-            **self.kwargs, filename=self.model_path))
-        tags_path = Path(hf_hub_download(
-            **self.kwargs, filename=self.tags_path))
+        model_path = f"{self.kwargs['repo_id']}/model.onnx"
+        tags_path = f"{self.kwargs['repo_id']}/selected_tags.csv"
+        # model_path = Path(hf_hub_download(
+        #     **self.kwargs, filename=self.model_path))
+        # tags_path = Path(hf_hub_download(
+        #     **self.kwargs, filename=self.tags_path))
         return model_path, tags_path
 
     def load(self) -> None:
@@ -203,7 +205,8 @@ class WaifuDiffusionInterrogator(Interrogator):
 
 available_interrogators = {
     'wd14-convnextv2-v2': WaifuDiffusionInterrogator(
-        'wd14-convnextv2-v2', repo_id='SmilingWolf/wd-v1-4-convnextv2-tagger-v2',
+        'wd14-convnextv2-v2', repo_id='./huggingface_models/wd-v1-4-convnextv2-tagger-v2',
+        # 'wd14-convnextv2-v2', repo_id='SmilingWolf/wd-v1-4-convnextv2-tagger-v2',
         revision='v2.0'
     ),
     'wd14-swinv2-v2': WaifuDiffusionInterrogator(

@@ -63,12 +63,67 @@ def check_dirs(dirs: List):
         if not os.path.exists(d):
             os.makedirs(d)
 
+def test_find_lora():
+    import mikazuki.utils as utils
+    logging_dir = "logs/20230725023307"
+    tensorboard_log =  utils.find_event_file(logging_dir)
+    if tensorboard_log is None:
+        print("虽然训练成功，但是找不到tensorboard日志文件！")
+    else:
+        print("tensorboard_log日志地址在",tensorboard_log)
+        model_dir = utils.find_best_model("haha1", "./output", tensorboard_log)
+        if model_dir is None:
+            print("虽然训练成功，但是找不到最优模型！")
+        else:
+            print("最好的模型路径是：", model_dir)
+
+def test_tensorboard():
+    from tensorboard.backend.event_processing import event_accumulator
+    ea = event_accumulator.EventAccumulator("logs/20230725023307/network_train/events.out.tfevents.1690223607.tvpn.63084.0", size_guidance={ # see below regarding this argument
+         event_accumulator.COMPRESSED_HISTOGRAMS: 500,
+         event_accumulator.IMAGES: 4,
+         event_accumulator.AUDIO: 4,
+         event_accumulator.SCALARS: 0,
+         event_accumulator.HISTOGRAMS: 1,
+     })
+    ea.Reload()
+    #get loss
+    print(ea.scalars.Keys())
+    # print(ea.scalars.Items('loss/average'))
+    # print(ea.scalars.Items('loss/epoch'))
+    # print(ea.scalars.Items('loss/epoch')[0][2])
+    print(len(ea.scalars.Items('loss/epoch')))
+    # print(ea.scalars.Items('loss/epoch'))
+    # print(ea.scalars.Items('loss')[0][2])
+    # #get lr
+    # print(ea.scalars.Keys())
+    # print(ea.scalars.Items('lr'))
+    # print(ea.scalars.Items('lr')[0][2])
+    # #get psnr
+    # print(ea.scalars.Keys())
+    # print(ea.scalars.Items('psnr'))
+    # print(ea.scalars.Items('psnr')[0][2])
+    # #get ssim
+    # print(ea.scalars.Keys())
+    # print(ea.scalars.Items('ssim'))
+    # print(ea.scalars.Items('ssim')[0][2])
+    # #get val_loss
+    # print(ea.scalars.Keys())
+    # print(ea.scalars.Items('val_loss'))
+    # print(ea.scalars.Items('val_loss')[0][2])
+    # #get loss average
+    # print(ea.scalars.Keys())
+    # print(ea.scalars.Items('loss_average'))
+    # print(ea.scalars.Items('loss_average')[0][2])
 
 if __name__ == "__main__":
     args, _ = parser.parse_known_args()
     remove_warnings()
     # prepare_frontend()
     run_tensorboard()
-    check_dirs(["toml/autosave", "logs"])
+    import tensorboard as tb
+    print("TensorBoard version: ", tb.__version__)
+    # test_tensorboard()
+    # test_find_lora()
     print(f"Server started at http://{args.host}:{args.port}")
     uvicorn.run("mikazuki.app_self:app", host=args.host, port=args.port, log_level="error")

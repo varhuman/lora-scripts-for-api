@@ -27,3 +27,4 @@ class TrainingInfo(BaseModel):
     error: str = ""
     progress: float = 0.0
     lora_name: str = ""
+    lora_path: str = ""

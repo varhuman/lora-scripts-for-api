@@ -8,20 +8,21 @@ from threading import Lock
 from typing import Optional
 import uuid
 from typing import List
-
+from fastapi.concurrency import run_in_threadpool
 import starlette.responses as starlette_responses
 from fastapi import BackgroundTasks, FastAPI, Request,Form, Query, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+import time
 
 import mikazuki.utils as utils
 import toml
 from mikazuki.models import TaggerInterrogateRequest, TrainingInfo
 from mikazuki.tagger.interrogator import (available_interrogators,
                                           on_interrogate)
-
-training_info_list: dict[str, TrainingInfo] = {} # {task_id, TrainingInfo}
+from mikazuki.training_info_manager import train_info_manager
+from mikazuki.log.logger import logger
 app = FastAPI()
 lock = Lock()
 avaliable_scripts = [
@@ -41,7 +42,6 @@ def _hooked_guess_type(*args, **kwargs):
         r = ("text/css", None)
     return r
 
-
 starlette_responses.guess_type = _hooked_guess_type
 
 
@@ -55,10 +55,10 @@ def run_train(toml_path: str,task_id:str,
     ]
     try:
         result = subprocess.run(args, env=os.environ)
-        if training_info_list.get(task_id) is None:
-            training_info_list[task_id] = TrainingInfo(error="该task_id不存在，奇怪的错误")
+        if train_info_manager.training_info_list.get(task_id) is None:
+            train_info_manager.training_info_list[task_id] = TrainingInfo(error="训练完成发现该task_id不存在，奇怪的错误")
         else:
-            training = training_info_list[task_id]
+            training = train_info_manager.training_info_list[task_id]
             if result.returncode != 0:
                 training.is_training=False
                 training.success=False
@@ -69,12 +69,14 @@ def run_train(toml_path: str,task_id:str,
                 training.success=True
                 training.error=""
                 print(f"Training finished / 训练完成")
+        train_info_manager.save_training_info()
+
     except Exception as e:
         print(f"An error occurred when training / 创建训练进程时出现致命错误: {e}")
     finally:
         lock.release()
 
-async def run_interrogate(images_path):
+def run_interrogate(images_path):
     tag = TaggerInterrogateRequest(path=images_path)
     interrogator = available_interrogators.get(tag.interrogator_model, available_interrogators["wd14-convnextv2-v2"])
     on_interrogate(image=None,
@@ -98,19 +100,49 @@ async def run_interrogate(images_path):
                     )
     return True
 
+async def run_find_best_model(task_id:str, model_name:str, output_dir:str, logging_dir:str, save_every_n_epochs: int, max_train_epochs: int):
+    try:
+        if train_info_manager.training_info_list.get(task_id) is None:
+            train_info_manager.training_info_list[task_id] = TrainingInfo(error="该task_id不存在，奇怪的错误")
+        else:
+            training = train_info_manager.training_info_list[task_id]
+        tensorboard_log =  utils.find_event_file(logging_dir)
+        if tensorboard_log is None:
+            training.error = "虽然训练成功，但是找不到tensorboard日志文件！"
+        else:
+            print("tensorboard_log日志地址在",tensorboard_log)
+            model_dir = utils.find_best_model(model_name, output_dir, tensorboard_log, save_every_n_epochs, max_train_epochs)
+            if model_dir is None:
+                training.error = "虽然训练成功，但是找不到最优模型！"
+            else:
+                training.model_dir = model_dir
+    except Exception as e:
+        print(f"An error occurred when run_find_best_model: {e}")
 
 
-async def pre_train(lora_model_name: str,folder_path:str, toml_path: str, task_id:str, images: List[UploadFile] = File(...), cpu_threads: Optional[int] = 2):
-    folder_path = os.path.join(folder_path, f"6_{lora_model_name}")
-    if not os.path.exists(folder_path):
-        os.makedirs(folder_path)
+async def run_process(toml_data, toml_path: str, task_id:str, images: List[UploadFile] = File(...), cpu_threads: Optional[int] = 2):
+    lora_model_name = toml_data["output_name"]
+    output_dir = toml_data["output_dir"]
+    logging_dir = toml_data["logging_dir"]
+    image_path = toml_data["train_data_dir"]
+    save_every_n_epochs = toml_data["save_every_n_epochs"]
+    max_train_epochs = toml_data["max_train_epochs"]
+    
+    image_path = os.path.join(image_path, f"35_{lora_model_name}")
+    if not os.path.exists(image_path):
+        os.makedirs(image_path)
     for image in images:
         contents = await image.read()
-        with open(os.path.join(folder_path, image.filename), "wb") as f:
+        with open(os.path.join(image_path, image.filename), "wb") as f:
             f.write(contents)
-    await run_interrogate(folder_path)
-    # Call run_train method
-    run_train(toml_path,task_id, cpu_threads)
+
+    #打标签
+    await run_in_threadpool(run_interrogate, image_path)
+
+    #开始训练
+    await run_in_threadpool(run_train, toml_path, task_id, cpu_threads)
+
+    await run_find_best_model(task_id, lora_model_name, output_dir, logging_dir, save_every_n_epochs, max_train_epochs)
 
 
 @app.middleware("http")
@@ -120,31 +152,33 @@ async def add_cache_control_header(request, call_next):
     return response
 
 @app.get("/api/training_status")
-async def get_training_status(task_id: str = Query(...)):
-    if training_info_list.get(task_id) is None:
+def get_training_status(task_id: str = Query(...)):
+    if train_info_manager.training_info_list.get(task_id) is None:
         return {"code": -1, "msg": "请求的task_id不存在"}
-    elif training_info_list[task_id].is_training:
-        return {"code": 0, "msg": "正在训练"}
+    elif train_info_manager.training_info_list[task_id].is_training:
+        return {"code": 0, "msg": "正在训练", "data": train_info_manager.training_info_list[task_id].dict()}
     else:
         #将训练信息转换成json格式返回
-        return  {"code": 1, "msg": "训练已经完成", "data": training_info_list[task_id].dict()}
+        return  {"code": 1, "msg": "训练已经完成", "data": train_info_manager.training_info_list[task_id].dict()}
 
 @app.post("/api/run")
 async def try_run_train_lora(background_tasks: BackgroundTasks, toml_data: str = Form(...), images: List[UploadFile] = File(...)):
     acquired = lock.acquire(blocking=False)
-
+    
+    # try:
+            
     if not acquired:
         print("Training is already running / 已有正在进行的训练")
         return {"code": -1, "detail": "已有正在进行的训练"}
 
     #使用uuid随机生成一个taskid不能重复,字符串类型
     task_id = str(uuid.uuid1())
-    while training_info_list.get(task_id) is not None:
+    while train_info_manager.training_info_list.get(task_id) is not None:
         task_id = str(uuid.uuid1())
 
+    print(f"Training started with config file / 训练开始，使用配置文件: {toml_data}")
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     toml_file = os.path.join(os.getcwd(), f"toml", "autosave", f"{timestamp}.toml")
-
     # 这里不需要再从请求体中读取数据，可以直接使用 `toml` 参数
     j = json.loads(toml_data)
 
@@ -157,13 +191,25 @@ async def try_run_train_lora(background_tasks: BackgroundTasks, toml_data: str =
     suggest_cpu_threads = 8 if len(images) > 100 else 2
 
     model = j["output_name"]
-    lora_model_name, folder_path = utils.get_unique_folder_path(model)
-    j["train_data_dir"] = folder_path
+    lora_model_name, image_path = utils.get_unique_folder_path(model)
+    j["train_data_dir"] = image_path
     j["output_name"] = lora_model_name
+
+    log_prefix = "" if j.get("log_prefix") is None else j.get("log_prefix")
+
+    logging_dir = j["logging_dir"]  + "/" + log_prefix + time.strftime("%Y%m%d%H%M%S", time.localtime())
+
+    j["logging_dir"] = logging_dir
+    old_output_dir = j["output_dir"]
+    j["output_dir"] = f"{old_output_dir}/{lora_model_name}"
+
+    train_info_manager.training_info_list[task_id] = TrainingInfo(is_training=True, success=False, error="", progress=0.0, lora_name=lora_model_name, model_dir="")
+
     with open(toml_file, "w") as f:
         f.write(toml.dumps(j))
-    background_tasks.add_task(pre_train,lora_model_name, folder_path, toml_file,task_id, images, suggest_cpu_threads)
-
-    training_info_list[task_id] = True
-
+    background_tasks.add_task(run_process, j, toml_file, task_id, images, suggest_cpu_threads)
+    # except Exception as e:
+    #     print(f"An error occurred when training / 创建训练进程时出现致命错误: {e}")
+    #     lock.release()
+    #     return {"code": -3, "detail": "创建训练进程时出现致命错误"}
     return {"code": 1, "task_id": task_id} #开始训练
