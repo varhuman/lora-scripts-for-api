@@ -111,11 +111,30 @@ async def run_find_best_model(task_id:str, model_name:str, output_dir:str, loggi
             training.error = "虽然训练成功，但是找不到tensorboard日志文件！"
         else:
             print("tensorboard_log日志地址在",tensorboard_log)
-            model_dir = utils.find_best_model(model_name, output_dir, tensorboard_log, save_every_n_epochs, max_train_epochs)
-            if model_dir is None:
+            result = utils.find_best_model(model_name, output_dir, tensorboard_log, save_every_n_epochs, max_train_epochs)
+            print("result",result)
+            if result is None:
                 training.error = "虽然训练成功，但是找不到最优模型！"
+                print("虽然训练成功，但是找不到最优模型！")
             else:
-                training.model_dir = model_dir
+                model_dir, new_model_name = result
+                print(f"找到啦！{model_dir} {new_model_name} {model_name}")
+                training.lora_path = model_dir
+                #假设lora模型最好的是haha-01.safetensors, 我们先要把haha.safetensors 改成haha_old.safetensors,再将haha-01.safetensors改成haha.safetensors，前提是最好的模型不是haha.safetensors
+                if new_model_name != model_name:
+                    old = f"{model_name}.safetensors"
+                    new = f"{model_name}_old.safetensors"
+                    res1 = utils.change_model_name(model_dir, old, new)
+                    old = f"{new_model_name}"
+                    new = f"{model_name}.safetensors"
+                    res2 = utils.change_model_name(model_dir, old, new)
+                    print("res1",res1,"res2",res2)
+                    if not res1 or not res2:
+                        training.error = f"最好的模型是{new_model_name}，但是改名失败"
+                        print(f"最好的模型是{new_model_name}，但是改名失败")
+
+
+
     except Exception as e:
         print(f"An error occurred when run_find_best_model: {e}")
 
@@ -156,7 +175,7 @@ def get_training_status(task_id: str = Query(...)):
     if train_info_manager.training_info_list.get(task_id) is None:
         return {"code": -1, "msg": "请求的task_id不存在"}
     elif train_info_manager.training_info_list[task_id].is_training:
-        return {"code": 0, "msg": "正在训练", "data": train_info_manager.training_info_list[task_id].dict()}
+        return {"code": 1, "msg": "正在训练", "data": train_info_manager.training_info_list[task_id].dict()}
     else:
         #将训练信息转换成json格式返回
         return  {"code": 1, "msg": "训练已经完成", "data": train_info_manager.training_info_list[task_id].dict()}

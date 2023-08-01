@@ -18,6 +18,18 @@ def find_event_file(directory):
                 return os.path.join(root, file)
     return None
 
+def change_model_name(model_path: str, old_name: str, new_name: str) -> bool:
+    print(f"model_path: {model_path} old_name {old_name}  new_name {new_name}")
+    if not os.path.exists(model_path):
+        return False
+    # model_old_path is file path
+    model_old_path = os.path.join(model_path, old_name)
+    if os.path.isfile(model_old_path):
+        model_new_path = os.path.join(model_path, new_name)
+        os.rename(model_old_path, model_new_path)
+        return True
+    return False
+
 def find_best_model(output_name, output_dir, log_dir, save_every_n_epochs: int, max_train_epochs: int):
     from tensorboard.backend.event_processing import event_accumulator
     ea = event_accumulator.EventAccumulator(log_dir, size_guidance={ # see below regarding this argument
@@ -41,7 +53,7 @@ def find_best_model(output_name, output_dir, log_dir, save_every_n_epochs: int, 
 
     for i in range(first_index, len(items), save_every_n_epochs):
         print(i)
-        diff = abs(items[i][2] - 0.08)
+        diff = abs(items[i].value - 0.08)
         if diff < best_diff or (abs(diff - best_diff) < 0.005 and i > best_index):
             best_diff = diff
             best_index = i
@@ -49,7 +61,9 @@ def find_best_model(output_name, output_dir, log_dir, save_every_n_epochs: int, 
     best_index = best_index + 1
     print("最好的模型索引是：", best_index)
 
-    pattern = os.path.join(output_dir, "{}-{{:06d}}.safetensors".format(output_name)).format(best_index)
+    model_base_name = "{}-{{:06d}}.safetensors".format(output_name)
+    model_name = model_base_name.format(best_index)
+    pattern = os.path.join(output_dir, model_name)
     pattern = pattern.replace("\\", "/")
     print("最好的模型路径是：", pattern)
     # 使用 glob 模块查找匹配的文件
@@ -57,9 +71,12 @@ def find_best_model(output_name, output_dir, log_dir, save_every_n_epochs: int, 
 
     # 如果找到一个匹配的文件，返回其路径
     if files:
-        return files[0]
+        print(f"找到最好的模型：{files[0]}  {model_name}", )
+        model_dir = os.path.dirname(files[0])
+        return model_dir, model_name
 
     # 如果没有找到匹配的文件，返回 None
+    print("没有找到最好的模型")
     return None
 
 
@@ -87,7 +104,7 @@ def get_unique_folder_path(model_name: str) -> str:
         if count == 0:
             folder_name = model_name
         else:
-            folder_name = f"{model_name}{count}"
+            folder_name = f"{model_name}_{count}"
         folder_path = os.path.join(base_dir, folder_name)
         if not os.path.exists(folder_path):
             os.makedirs(folder_path)
@@ -95,6 +112,23 @@ def get_unique_folder_path(model_name: str) -> str:
             return folder_name, folder_path
         count += 1
 
+
+#'168529894851919052915-000002.safetensors' to '168529894851919052915.safetensors'
+def replace_lora_name(filename: str):
+    # 找到最后一个'.'
+    last_dot_index = filename.rfind('.')
+    # 如果找不到'.', 那么文件名不需要改变
+    if last_dot_index == -1:
+        return filename
+    else:
+        # 找到最后一个'-'，它在最后一个'.'前面
+        last_dash_index = filename.rfind('-', 0, last_dot_index)
+        # 如果找不到'-'，那么文件名不需要改变
+        if last_dash_index == -1:
+            return filename
+        else:
+            # 移除'-'和'.'之间的部分
+            return filename[:last_dash_index] + filename[last_dot_index:]
 
 def prepare_requirements():
     requirements = [
