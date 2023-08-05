@@ -5,6 +5,7 @@ import subprocess
 import importlib.util
 from typing import Optional
 import glob
+import shutil
 
 python_bin = sys.executable
 
@@ -29,6 +30,19 @@ def change_model_name(model_path: str, old_name: str, new_name: str) -> bool:
         os.rename(model_old_path, model_new_path)
         return True
     return False
+
+def find_latest_big_model(output_dir):
+    # 找出output_dir中所有大于20m的文件
+    big_files = [f for f in glob.glob(os.path.join(output_dir, "*")) 
+                 if os.path.getsize(f) > 20 * 1024 * 1024]
+    
+    if not big_files:  # 如果没有找到大文件，返回None
+        return None
+    
+    # 选择时间最晚的模型
+    latest_big_file = max(big_files, key=os.path.getmtime)
+    
+    return latest_big_file
 
 def find_best_model(output_name, output_dir, log_dir, save_every_n_epochs: int, max_train_epochs: int):
     from tensorboard.backend.event_processing import event_accumulator
@@ -61,8 +75,11 @@ def find_best_model(output_name, output_dir, log_dir, save_every_n_epochs: int, 
     best_index = best_index + 1
     print("最好的模型索引是：", best_index)
 
-    model_base_name = "{}-{{:06d}}.safetensors".format(output_name)
-    model_name = model_base_name.format(best_index)
+    if best_index != len(items):
+        model_base_name = "{}-{{:06d}}.safetensors".format(output_name)
+        model_name = model_base_name.format(best_index)
+    else:
+        model_name = "{}.safetensors".format(output_name)
     pattern = os.path.join(output_dir, model_name)
     pattern = pattern.replace("\\", "/")
     print("最好的模型路径是：", pattern)
@@ -74,10 +91,55 @@ def find_best_model(output_name, output_dir, log_dir, save_every_n_epochs: int, 
         print(f"找到最好的模型：{files[0]}  {model_name}", )
         model_dir = os.path.dirname(files[0])
         return model_dir, model_name
+    else:
+        model_name = "{}.safetensors".format(output_name)
+        pattern = os.path.join(output_dir, model_name)
+        pattern = pattern.replace("\\", "/")
+        print("默认模型路径是：", pattern)
+        # 使用 glob 模块查找匹配的文件
+        files = glob.glob(pattern)
+        if files:
+            print(f"找到默认模型：{files[0]}  {model_name}", )
+            model_dir = os.path.dirname(files[0])
+            return model_dir, model_name
+        else:
+            latest_big_model = find_latest_big_model(output_dir)
+
+            if latest_big_model:
+                print(f"默认模型也没有，返回最新的模型：{latest_big_model}")
+                model_dir = os.path.dirname(latest_big_model)
+                model_name = os.path.basename(latest_big_model)
+                return model_dir, model_name
 
     # 如果没有找到匹配的文件，返回 None
-    print("没有找到最好的模型")
+    print("实在没有找到。。没有找到最好的模型")
     return None
+
+def move_images(source_dir, target_dir):
+    # 计数器，记录移动的文件数量
+    count = 0
+
+    # 检查源目录是否存在
+    if not os.path.exists(source_dir):
+        print(f"Source directory {source_dir} does not exist.")
+        return
+
+    for file_name in os.listdir(source_dir):
+        # 组合成完整的文件或目录路径
+        source = os.path.join(source_dir, file_name)
+        target = os.path.join(target_dir, file_name)
+
+        try:
+            # 尝试移动文件或目录
+            if not os.path.exists(target_dir):
+                os.makedirs(target_dir)
+            shutil.move(source, target)
+            print(f"Moved: {file_name}")
+            count += 1
+        except Exception as e:
+            print(f"Failed to move {file_name}. Error: {e}")
+
+    print(f"Moved {count} file(s) from {source_dir} to {target_dir}")
 
 
 def check_training_params(data):
@@ -97,7 +159,7 @@ def check_training_params(data):
     return True
 
 
-def get_unique_folder_path(model_name: str) -> str:
+def get_unique_folder_path(model_name: str, isCheck: bool = True) -> str:
     base_dir = "./train"
     count = 0
     while True:
@@ -106,8 +168,8 @@ def get_unique_folder_path(model_name: str) -> str:
         else:
             folder_name = f"{model_name}_{count}"
         folder_path = os.path.join(base_dir, folder_name)
-        if not os.path.exists(folder_path):
-            os.makedirs(folder_path)
+        if not os.path.exists(folder_path) or not isCheck:
+            os.makedirs(folder_path, exist_ok=True)
             folder_path = folder_path.replace("\\", "/")
             return folder_name, folder_path
         count += 1

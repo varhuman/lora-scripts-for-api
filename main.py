@@ -121,6 +121,20 @@ if __name__ == "__main__":
     remove_warnings()
     # prepare_frontend()
     # run_tensorboard()
+#     import os
+#     import subprocess
+
+    # 获取当前conda环境
+    conda_env = os.environ.get('CONDA_DEFAULT_ENV', 'Not inside a Conda environment')
+    print(f'Current Conda environment: {conda_env}')
+
+#     # 获取已安装的pip包
+#     process = subprocess.run(["pip", "freeze"], text=True, capture_output=True)
+#     pip_packages = process.stdout.splitlines()
+#     print('Installed pip packages:')
+#     for package in pip_packages:
+#         print(package)
+
     import tensorboard as tb
     print("TensorBoard version: ", tb.__version__)
     # test_tensorboard()
