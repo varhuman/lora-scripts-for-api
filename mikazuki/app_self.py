@@ -48,7 +48,7 @@ starlette_responses.guess_type = _hooked_guess_type
 def run_train(toml_path: str,task_id:str,
               cpu_threads: Optional[int] = 2):
     print(f"Training started with config file / 训练开始，使用配置文件: {toml_path}")
-    print(f"开始训练：{sys.executable} os.environ{os.environ}")
+    print(f"开始训练：{sys.executable} os.getcwd(){os.getcwd()} os.environ{os.environ}")
     args = [
         sys.executable, "-m", "accelerate.commands.launch", "--num_cpu_threads_per_process", str(cpu_threads),
         "./sd-scripts/train_network.py",
@@ -150,7 +150,7 @@ async def run_process(toml_data, toml_path: str, task_id:str, images: List[Uploa
     save_every_n_epochs = toml_data["save_every_n_epochs"]
     max_train_epochs = toml_data["max_train_epochs"]
     
-    image_path = os.path.join(image_path, f"35_{lora_model_name}")
+    image_path = os.path.join(image_path, f"50_{lora_model_name}")
     if not os.path.exists(image_path):
         os.makedirs(image_path)
     for image in images:
@@ -175,7 +175,7 @@ async def run_process_without_interrogate(toml_data, toml_path: str, task_id:str
     max_train_epochs = toml_data["max_train_epochs"]
 
     #图片已经处理过，这里将所有图片移动到子文件夹 
-    image_new_path = os.path.join(image_path, f"35_{lora_model_name}")
+    image_new_path = os.path.join(image_path, f"50_{lora_model_name}")
     utils.move_images(image_path, image_new_path)
 
     #开始训练
