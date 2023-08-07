@@ -142,7 +142,7 @@ async def run_find_best_model(task_id:str, model_name:str, output_dir:str, loggi
         print(f"An error occurred when run_find_best_model: {e}")
 
 
-async def run_process(toml_data, toml_path: str, task_id:str, images: List[UploadFile] = File(...), cpu_threads: Optional[int] = 2):
+async def run_process(toml_data, toml_path: str, task_id:str, steps: int, images: List[UploadFile] = None, cpu_threads: Optional[int] = 2):
     lora_model_name = toml_data["output_name"]
     output_dir = toml_data["output_dir"]
     logging_dir = toml_data["logging_dir"]
@@ -150,39 +150,24 @@ async def run_process(toml_data, toml_path: str, task_id:str, images: List[Uploa
     save_every_n_epochs = toml_data["save_every_n_epochs"]
     max_train_epochs = toml_data["max_train_epochs"]
     
-    image_path = os.path.join(image_path, f"35_{lora_model_name}")
-    if not os.path.exists(image_path):
-        os.makedirs(image_path)
-    for image in images:
-        contents = await image.read()
-        with open(os.path.join(image_path, image.filename), "wb") as f:
-            f.write(contents)
-
-    #打标签
-    await run_in_threadpool(run_interrogate, image_path)
-
-    #开始训练
-    await run_in_threadpool(run_train, toml_path, task_id, cpu_threads)
-
-    await run_find_best_model(task_id, lora_model_name, output_dir, logging_dir, save_every_n_epochs, max_train_epochs)
-
-async def run_process_without_interrogate(toml_data, toml_path: str, task_id:str, cpu_threads: Optional[int] = 2):
-    lora_model_name = toml_data["output_name"]
-    output_dir = toml_data["output_dir"]
-    logging_dir = toml_data["logging_dir"]
-    image_path = toml_data["train_data_dir"]
-    save_every_n_epochs = toml_data["save_every_n_epochs"]
-    max_train_epochs = toml_data["max_train_epochs"]
-
-    #图片已经处理过，这里将所有图片移动到子文件夹 
-    image_new_path = os.path.join(image_path, f"35_{lora_model_name}")
-    utils.move_images(image_path, image_new_path)
+    image_new_path = os.path.join(image_path, f"{steps}_{lora_model_name}")
+    if images is None:
+        #图片已经处理过，这里将所有图片移动到子文件夹 
+        utils.move_images(image_path, image_new_path)
+    else:
+        if not os.path.exists(image_new_path):
+            os.makedirs(image_new_path)
+        for image in images:
+            contents = await image.read()
+            with open(os.path.join(image_new_path, image.filename), "wb") as f:
+                f.write(contents)
+        #图片未处理就需要打标签
+        await run_in_threadpool(run_interrogate, image_new_path)
 
     #开始训练
     await run_in_threadpool(run_train, toml_path, task_id, cpu_threads)
 
     await run_find_best_model(task_id, lora_model_name, output_dir, logging_dir, save_every_n_epochs, max_train_epochs)
-
 
 @app.middleware("http")
 async def add_cache_control_header(request, call_next):
@@ -201,7 +186,7 @@ def get_training_status(task_id: str = Query(...)):
         return  {"code": 1, "msg": "训练已经完成", "data": train_info_manager.training_info_list[task_id].dict()}
 
 @app.post("/run")
-async def try_run_train_lora(background_tasks: BackgroundTasks, toml_data: str = Form(...), images: List[UploadFile] = File(None)):
+async def try_run_train_lora(background_tasks: BackgroundTasks, toml_data: str = Form(...), steps: int = Form(50), images: List[UploadFile] = File(None)):
     acquired = lock.acquire(blocking=False)
     
     # try:
@@ -248,10 +233,10 @@ async def try_run_train_lora(background_tasks: BackgroundTasks, toml_data: str =
     with open(toml_file, "w") as f:
         f.write(toml.dumps(j))
 
-    if images is None:
-        background_tasks.add_task(run_process_without_interrogate, j, toml_file, task_id, suggest_cpu_threads)
-    else:
-        background_tasks.add_task(run_process, j, toml_file, task_id, images, suggest_cpu_threads)
+    # if images is None:
+    #     background_tasks.add_task(run_process_without_interrogate, j, toml_file, task_id, suggest_cpu_threads)
+    # else:
+    background_tasks.add_task(run_process, j, toml_file, task_id, steps, images, suggest_cpu_threads)
     # except Exception as e:
     #     print(f"An error occurred when training / 创建训练进程时出现致命错误: {e}")
     #     lock.release()
